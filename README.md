@@ -19,9 +19,9 @@ from there. The host DLL stays functional.
 Code sections get integrity-checked (hash vs on-disk). Data sections don't -- they're
 writable, they're supposed to change at runtime. Nobody signature-scans `.data`.
 
-`PAGE_EXECUTE` on the payload pages is the only anomaly. On HVCI systems it's truly
-execute-only (scanners can't even read it). Without HVCI, x64 PTEs can't separate
-execute from read so it behaves like `PAGE_EXECUTE_READ`.
+`PAGE_EXECUTE` on the payload pages is the only anomaly. On x64 this is equivalent to
+`PAGE_EXECUTE_READ` at the hardware level (PTEs can't separate execute from read).
+True execute-only would require custom EPT manipulation at the hypervisor level.
 
 ## Detection
 
@@ -35,11 +35,10 @@ the detection surface approaches zero.
 | Thread start address | `NtQueryInformationThread` reports start in `.data` | `.text` trampoline as `CreateThread` entry |
 | Stack walking | Hooked APIs see return address in `.data` | Stack spoofing + `.text` call trampolines |
 | RIP sampling | ETW / kernel profiler samples RIP inside `.data` | Only vulnerable during active execution window -- mostly blocked in kernel waits |
-| Memory scanning | `ReadProcessMemory` reads payload bytes | HVCI `PAGE_EXECUTE` = true execute-only, reads fail |
+| Memory scanning | `ReadProcessMemory` reads payload bytes | On x64, `PAGE_EXECUTE` still allows reads (PTE limitation). True execute-only requires custom EPT. |
 
 With all bypasses applied (manual syscalls + stack spoofing + `.text` trampolines +
-timed page flipping + HVCI), detection requires either hypervisor-level PTE introspection
-timed to the exact execution window, or behavioral analysis of what the payload does
+timed page flipping), detection requires behavioral analysis of what the payload does
 rather than where it lives.
 
 Nobody runs `.data`-section-specific checks today.

