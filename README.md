@@ -22,9 +22,11 @@ from there. The host DLL stays functional.
 Code sections get integrity-checked (hash vs on-disk). Data sections don't -- they're
 writable, they're supposed to change at runtime. Nobody signature-scans `.data`.
 
-`PAGE_EXECUTE` on the payload pages is the only anomaly. On x64 this is equivalent to
-`PAGE_EXECUTE_READ` at the hardware level (PTEs can't separate execute from read).
-True execute-only would require custom EPT manipulation at the hypervisor level.
+`PAGE_EXECUTE` on the payload pages is the only anomaly. On x64 this is identical to
+`PAGE_EXECUTE_READ` -- AMD64 PTEs only have a single NX bit (executable or not), so
+there's no hardware way to allow execution while blocking reads. The `PAGE_EXECUTE`
+constant exists for forward compatibility with architectures that can (ARM64 has
+separate permission bits and can actually enforce execute-only).
 
 ## Detection
 
