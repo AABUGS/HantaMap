@@ -25,19 +25,18 @@ execute from read so it behaves like `PAGE_EXECUTE_READ`.
 
 ## Detection
 
-Two theoretical vectors, both bypassable:
+- **Any execution in `.data` is anomalous.** Not just the thread start address --
+  any RIP inside a `.data` section at any point is invalid. ETW stack walks, kernel
+  callbacks, or sampling profilers would catch this. Thread start address spoofing
+  (`.text` trampoline) hides the initial dispatch but not ongoing execution.
 
-- **`VirtualQuery` on `.data` pages** showing `PAGE_EXECUTE` instead of `PAGE_READWRITE`.
-  Bypassable by flipping pages back to `PAGE_READWRITE` (with backup data restored)
-  while the payload sleeps, and only marking `PAGE_EXECUTE` during active execution.
-  Periodic scanners would have to catch the exact window.
+- **Page protection changes.** `VirtualQuery` is the obvious one, but also
+  `NtQueryVirtualMemory`, hooking `VirtualProtect` calls, or kernel-mode PTE
+  inspection. Timed page flipping (restore `PAGE_READWRITE` during sleep) reduces
+  the window but doesn't eliminate it.
 
-- **Thread start address** via `NtQueryInformationThread` pointing into `.data`.
-  Bypassable by using a small trampoline in `.text` as the `CreateThread` start,
-  which jumps to the real entry. The reported start address stays in `.text`.
-
-With HVCI + both bypasses, detection requires hypervisor-level introspection. No
-mainstream AV/EDR runs these checks today.
+In practice nobody runs these checks on `.data` sections today. Fun PoC to release,
+not a 0day.
 
 ## Build
 
