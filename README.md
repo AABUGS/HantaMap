@@ -25,18 +25,24 @@ execute from read so it behaves like `PAGE_EXECUTE_READ`.
 
 ## Detection
 
-- **Any execution in `.data` is anomalous.** Not just the thread start address --
-  any RIP inside a `.data` section at any point is invalid. ETW stack walks, kernel
-  callbacks, or sampling profilers would catch this. Thread start address spoofing
-  (`.text` trampoline) hides the initial dispatch but not ongoing execution.
+The PoC as shipped is detectable. Each vector has a known bypass. Stack them all and
+the detection surface approaches zero.
 
-- **Page protection changes.** `VirtualQuery` is the obvious one, but also
-  `NtQueryVirtualMemory`, hooking `VirtualProtect` calls, or kernel-mode PTE
-  inspection. Timed page flipping (restore `PAGE_READWRITE` during sleep) reduces
-  the window but doesn't eliminate it.
+| Vector | What catches you | Bypass |
+|--------|-----------------|--------|
+| Page protection | `VirtualQuery` / `NtQueryVirtualMemory` sees `PAGE_EXECUTE` on `.data` | Timed page flipping -- `PAGE_READWRITE` with backup data during sleep, `PAGE_EXECUTE` only during active execution |
+| `VirtualProtect` hooks | AV/AC hooks `NtProtectVirtualMemory`, logs the flip | Manual syscalls |
+| Thread start address | `NtQueryInformationThread` reports start in `.data` | `.text` trampoline as `CreateThread` entry |
+| Stack walking | Hooked APIs see return address in `.data` | Stack spoofing + `.text` call trampolines |
+| RIP sampling | ETW / kernel profiler samples RIP inside `.data` | Only vulnerable during active execution window -- mostly blocked in kernel waits |
+| Memory scanning | `ReadProcessMemory` reads payload bytes | HVCI `PAGE_EXECUTE` = true execute-only, reads fail |
 
-In practice nobody runs these checks on `.data` sections today. Fun PoC to release,
-not a 0day.
+With all bypasses applied (manual syscalls + stack spoofing + `.text` trampolines +
+timed page flipping + HVCI), detection requires either hypervisor-level PTE introspection
+timed to the exact execution window, or behavioral analysis of what the payload does
+rather than where it lives.
+
+Nobody runs `.data`-section-specific checks today.
 
 ## Build
 
