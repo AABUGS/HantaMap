@@ -11,8 +11,11 @@ from there. The host DLL stays functional.
 
 1. Loads user32.dll, backs up its `.data` section
 2. Writes payload at the tail end of `.data` (host globals at the front stay intact)
-3. Marks payload pages `PAGE_EXECUTE`, installs a VEH to proxy read/write faults
+3. Marks payload pages `PAGE_EXECUTE`, installs a VEH to proxy write faults
 4. Payload runs from user32.dll's address space at full speed
+5. During sleep, a trampoline in the mapper's `.text` flips payload pages to
+   `PAGE_NOACCESS` — reads, writes, and scans are blocked for the entire sleep
+   duration (~99.9% of the payload's lifetime)
 
 ## Why `.data`
 
@@ -25,12 +28,11 @@ True execute-only would require custom EPT manipulation at the hypervisor level.
 
 ## Detection
 
-The PoC as shipped is detectable. Each vector has a known bypass. Stack them all and
-the detection surface approaches zero.
+The PoC as shipped is detectable. Each vector has a known bypass.
 
 | Vector | What catches you | Bypass |
 |--------|-----------------|--------|
-| Page protection | `VirtualQuery` / `NtQueryVirtualMemory` sees `PAGE_EXECUTE` on `.data` | Timed page flipping -- `PAGE_READWRITE` with backup data during sleep, `PAGE_EXECUTE` only during active execution |
+| Page protection | `VirtualQuery` / `NtQueryVirtualMemory` sees `PAGE_EXECUTE` on `.data` | Implemented: guarded sleep flips to `PAGE_NOACCESS` during sleep, `PAGE_EXECUTE` only during active execution |
 | `VirtualProtect` hooks | AV/AC hooks `NtProtectVirtualMemory`, logs the flip | Manual syscalls |
 | Thread start address | `NtQueryInformationThread` reports start in `.data` | `.text` trampoline as `CreateThread` entry |
 | Stack walking | Hooked APIs see return address in `.data` | Stack spoofing + `.text` call trampolines |
@@ -38,8 +40,7 @@ the detection surface approaches zero.
 | Memory scanning | `ReadProcessMemory` reads payload bytes | On x64, `PAGE_EXECUTE` still allows reads (PTE limitation). True execute-only requires custom EPT. |
 
 With all bypasses applied (manual syscalls + stack spoofing + `.text` trampolines +
-timed page flipping), detection requires behavioral analysis of what the payload does
-rather than where it lives.
+timed page flipping), you'd need behavioral analysis to catch it.
 
 Nobody runs `.data`-section-specific checks today.
 
